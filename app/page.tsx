@@ -80,7 +80,7 @@ export default function Home() {
     // Loop through all pages
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 2.0 }); // Scale 2.0 for better quality text
+      const viewport = page.getViewport({ scale: 2.0 }); // Scale 2.0 for better quality
       
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
@@ -88,7 +88,13 @@ export default function Home() {
       canvas.width = viewport.width;
 
       if (context) {
-        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        // WE ADD 'as any' HERE TO FIX THE ERROR
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport
+        } as any;
+
+        await page.render(renderContext).promise;
         images.push(canvas.toDataURL('image/jpeg'));
       }
     }
