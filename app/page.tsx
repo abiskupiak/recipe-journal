@@ -6,12 +6,7 @@ import { BookHeart, Plus, ChevronLeft, ChefHat, Trash2, Star, Loader2, Download 
 import dynamic from 'next/dynamic';
 import { RecipeBookletPDF } from './RecipePDF';
 
-// Import PDF.js for reading PDF uploads
-import * as pdfjsLib from 'pdfjs-dist';
-
-// PDF.js Worker Setup (Required for Next.js/Vercel)
-// We use a CDN link to ensure the worker loads correctly in production
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// NOTE: We do NOT import pdfjs-dist at the top level anymore to prevent Vercel errors.
 
 const PDFDownloadLink = dynamic(
   () => import('@react-pdf/renderer').then((mod) => mod.PDFDownloadLink),
@@ -73,6 +68,12 @@ export default function Home() {
 
   // --- HELPER: Read PDF and Convert Pages to Images ---
   const pdfToImages = async (file: File): Promise<string[]> => {
+    // 1. DYNAMICALLY IMPORT PDF.JS (Only loads in the browser)
+    const pdfjsLib = await import('pdfjs-dist');
+    
+    // 2. SET WORKER (Using local version to match)
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     const images: string[] = [];
@@ -80,7 +81,7 @@ export default function Home() {
     // Loop through all pages
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 2.0 }); // Scale 2.0 for better quality
+      const viewport = page.getViewport({ scale: 2.0 }); 
       
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
@@ -88,7 +89,7 @@ export default function Home() {
       canvas.width = viewport.width;
 
       if (context) {
-        // WE ADD 'as any' HERE TO FIX THE ERROR
+        // FIX: 'as any' prevents TypeScript error about missing properties
         const renderContext = {
           canvasContext: context,
           viewport: viewport
@@ -286,7 +287,7 @@ export default function Home() {
                 <input 
                   type="file" 
                   multiple 
-                  accept="image/*,.pdf" // Allows PDF selection
+                  accept="image/*,.pdf"
                   onChange={handleUpload}
                   disabled={loading}
                   className="hidden"
