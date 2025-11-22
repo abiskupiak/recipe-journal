@@ -68,11 +68,13 @@ export default function Home() {
 
   // --- HELPER: Read PDF and Convert Pages to Images ---
   const pdfToImages = async (file: File): Promise<string[]> => {
-    // 1. DYNAMICALLY IMPORT PDF.JS (Only loads in the browser)
+    // 1. DYNAMICALLY IMPORT PDF.JS 
     const pdfjsLib = await import('pdfjs-dist');
     
-    // 2. SET WORKER (Using local version to match)
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+    // 2. SET WORKER (SWITCHED TO UNPKG FOR RELIABILITY)
+    // We use unpkg.com because it matches the npm version exactly.
+    // We use .mjs because modern pdfjs use ES modules.
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -89,7 +91,6 @@ export default function Home() {
       canvas.width = viewport.width;
 
       if (context) {
-        // FIX: 'as any' prevents TypeScript error about missing properties
         const renderContext = {
           canvasContext: context,
           viewport: viewport
