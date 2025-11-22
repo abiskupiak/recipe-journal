@@ -6,7 +6,13 @@ import { BookHeart, Plus, ChevronLeft, ChefHat, Trash2, Star, Loader2, Download 
 import dynamic from 'next/dynamic';
 import { RecipeBookletPDF } from './RecipePDF';
 
-// Dynamic import for PDF to avoid server-side issues
+// Import PDF.js for reading PDF uploads
+import * as pdfjsLib from 'pdfjs-dist';
+
+// PDF.js Worker Setup (Required for Next.js/Vercel)
+// We use a CDN link to ensure the worker loads correctly in production
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
 const PDFDownloadLink = dynamic(
   () => import('@react-pdf/renderer').then((mod) => mod.PDFDownloadLink),
   { ssr: false }
@@ -23,6 +29,7 @@ export default function Home() {
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("Mixing ingredients...");
 
   useEffect(() => {
     fetchRecipes();
@@ -56,16 +63,44 @@ export default function Home() {
     }
   };
 
-  const toBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+  // --- HELPER: Read Standard Image ---
+  const imageToBase64 = (file: File) => new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = error => reject(error);
   });
 
+  // --- HELPER: Read PDF and Convert Pages to Images ---
+  const pdfToImages = async (file: File): Promise<string[]> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const images: string[] = [];
+
+    // Loop through all pages
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 }); // Scale 2.0 for better quality text
+      
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      if (context) {
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        images.push(canvas.toDataURL('image/jpeg'));
+      }
+    }
+    return images;
+  };
+
+  // --- MAIN UPLOAD LOGIC ---
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     setLoading(true);
+    setLoadingMessage("Reading files...");
+    
     const files = Array.from(e.target.files);
 
     try {
@@ -76,11 +111,25 @@ export default function Home() {
         userId = authData.user?.id;
       }
 
-      const base64Images = await Promise.all(files.map(file => toBase64(file)));
+      // Process all files (Handle PDF vs Image)
+      let allBase64Images: string[] = [];
+
+      for (const file of files) {
+        if (file.type === 'application/pdf') {
+          setLoadingMessage(`Scanning PDF pages...`);
+          const pdfImages = await pdfToImages(file);
+          allBase64Images = [...allBase64Images, ...pdfImages];
+        } else {
+          const img = await imageToBase64(file);
+          allBase64Images.push(img);
+        }
+      }
+
+      setLoadingMessage("AI is reading the recipe...");
 
       const response = await fetch('/api/digitize', {
         method: 'POST',
-        body: JSON.stringify({ images: base64Images, userId }),
+        body: JSON.stringify({ images: allBase64Images, userId }),
       });
 
       const result = await response.json();
@@ -93,6 +142,7 @@ export default function Home() {
       }
 
     } catch (err: any) {
+      console.error(err);
       alert("Something went wrong: " + err.message);
     } finally {
       setLoading(false);
@@ -122,8 +172,6 @@ export default function Home() {
           </div>
           
           <div className="flex gap-4 items-center">
-             
-             {/* --- PDF BUTTON --- */}
              {view === 'book' && recipes.length > 0 && (
                 <PDFDownloadLink
                   document={<RecipeBookletPDF recipes={recipes} />}
@@ -217,22 +265,22 @@ export default function Home() {
 
             <div className="bg-white p-10 rounded-3xl shadow-xl shadow-pink-100 border-4 border-pink-100 text-center relative overflow-hidden">
               <h2 className="text-3xl font-hand text-slate-800 mb-2">Capture a Recipe</h2>
-              <p className="text-slate-500 mb-8 font-medium">Snap a photo of a cookbook page, card, or scribbled note.</p>
+              <p className="text-slate-500 mb-8 font-medium">Upload PDFs, cookbook photos, or handwritten notes.</p>
               
               <label className="block w-full cursor-pointer group">
                 <div className="border-3 border-dashed border-pink-200 rounded-2xl p-12 group-hover:bg-pink-50 group-hover:border-pink-400 transition-all bg-slate-50">
                   <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm group-hover:scale-110 transition-transform">
                     <Plus size={32} className="text-pink-400" />
                   </div>
-                  <span className="block text-lg font-bold text-slate-700">Click to Select Photos</span>
+                  <span className="block text-lg font-bold text-slate-700">Click to Select</span>
                   <span className="block text-xs text-pink-500 mt-2 font-bold bg-pink-100 px-2 py-1 rounded-full inline-block">
-                    Supports Multi-Page!
+                    Supports Images & PDF
                   </span>
                 </div>
                 <input 
                   type="file" 
                   multiple 
-                  accept="image/*"
+                  accept="image/*,.pdf" // Allows PDF selection
                   onChange={handleUpload}
                   disabled={loading}
                   className="hidden"
@@ -242,7 +290,7 @@ export default function Home() {
               {loading && (
                 <div className="mt-8 flex flex-col items-center">
                   <Loader2 size={32} className="text-pink-400 animate-spin mb-2" />
-                  <p className="text-sm text-pink-600 font-bold animate-pulse">Mixing ingredients... (Reading text)</p>
+                  <p className="text-sm text-pink-600 font-bold animate-pulse">{loadingMessage}</p>
                 </div>
               )}
             </div>
